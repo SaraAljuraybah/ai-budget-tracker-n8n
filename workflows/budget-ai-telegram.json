@@ -1,0 +1,315 @@
+{
+  "name": "budget-ai-telegram",
+  "nodes": [
+    {
+      "parameters": {
+        "updates": [
+          "message"
+        ],
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-base.telegramTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ],
+      "id": "37fb6293-a55f-4dc8-8fba-6b96c4133634",
+      "name": "Telegram Trigger",
+      "webhookId": "40ded0b4-dc06-46da-9d17-2e77ae890747",
+      "credentials": {
+        "telegramApi": {
+          "id": "sBXBAfYRsCzZKhOt",
+          "name": "Telegram account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Telegram Trigger').item.json.message.chat.id }}",
+        "text": "=Done",
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1024,
+        0
+      ],
+      "id": "db006867-670c-4a29-afa5-113d0c544062",
+      "name": "Send a text message",
+      "webhookId": "39c0ac54-96b7-47f8-82a2-c743b867ee8c",
+      "credentials": {
+        "telegramApi": {
+          "id": "sBXBAfYRsCzZKhOt",
+          "name": "Telegram account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.message.text }}",
+        "options": {
+          "systemMessage": "You are a personal budget extraction assistant.\n\nYour job is to extract structured budget data from free-text messages written in Arabic or English.\nThe user writes natural messages describing income, expenses, and savings.\n\nAlways return the result as VALID JSON ONLY.\nDo not include any explanations, comments, or extra text.\n\nUse the following exact schema and order:\n\n{\n  \"date\": \"YYYY-MM-DD\",\n  \"time\": \"HH:MM\",\n  \"income\": number,\n  \"expenses\": number,\n  \"savings\": number,\n  \"payment_method\": string,\n  \"expense_category\": string,\n  \"notes\": string\n}\n\nRules:\n\n1. Date and Time\n- Convert dates and times to standard format.\n- If the date is mentioned as \"today\", \"yesterday\", or a weekday, infer the correct date.\n- If time is not mentioned, return null.\n\n2. Income\n- Income means NEW money received (salary, gift, refund, etc).\n- If income is not mentioned, return 0.\n\n3. Expenses\n- Expenses are amounts spent.\n- If expenses are not mentioned, return 0.\n\n4. Savings\n- Savings means money intentionally set aside.\n- If savings are not explicitly mentioned:\n  - Calculate savings = income − expenses (only if income > 0).\n  - Otherwise return 0.\n\n5. Balance\n- Do NOT calculate or return balance.\n- Balance is handled separately by the system.\n\n6. Payment Method\n- Extract payment method if mentioned (Cash, Card, Apple Pay, Bank Transfer).\n- If not mentioned, return null.\n\n7. Expense Category\n- Expense category MUST be exactly one of the following values (case-sensitive):\n  Groceries, Food & Drinks, Transport, Shopping, Bills, Rent, Health, Subscriptions, Fun, Education, Gifts, Savings, Other\n- Choose the closest matching category.\n- If nothing clearly matches, use \"Other\".\n\n8. Notes\n- Notes should be a short summary of the message in English.\n- Do not repeat numbers in notes.\n- Keep it concise.\n\n9. Output\n- Output JSON only.\n- Use numbers without currency symbols.\n- Use null for missing values (except income/expenses/savings which default to 0).\n"
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        240,
+        0
+      ],
+      "id": "400c9da6-8287-46b2-8822-d235523a254c",
+      "name": "AI Agent"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1,
+      "position": [
+        144,
+        224
+      ],
+      "id": "cc90e076-801e-481f-898a-226fadcf578f",
+      "name": "Google Gemini Chat Model",
+      "credentials": {
+        "googlePalmApi": {
+          "id": "CaA7jJDFIsp99K40",
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// 1) Get AI output (string)\nlet aiText = $input.first().json.output || \"\";\n\n// 2) Clean markdown/code-fence wrappers like ```json ... ```\naiText = aiText.trim();\n\n// Remove starting ```json or ``` and ending ```\naiText = aiText\n  .replace(/^```(?:json)?\\s*/i, \"\")\n  .replace(/```$/i, \"\")\n  .trim();\n\n// Sometimes AI returns leading \"json\" alone (rare)\naiText = aiText.replace(/^json\\s*/i, \"\").trim();\n\n// 3) Parse JSON safely\nlet data;\ntry {\n  data = JSON.parse(aiText);\n} catch (e) {\n  return [{\n    json: {\n      error: \"Invalid AI JSON output (after cleaning)\",\n      raw_output: $input.first().json.output,\n      cleaned_output: aiText\n    }\n  }];\n}\n\n// 4) Default values\nconst date = data.date || new Date().toISOString().split(\"T\")[0];\nconst time = data.time ?? null;\n\nconst income = Number(data.income || 0);\nconst expenses = Number(data.expenses || 0);\nconst savings = Number(data.savings || 0);\n\nconst payment_method = data.payment_method || \"Unknown\";\nconst category = data.expense_category || \"Other\";\nconst notes = data.notes || \"\";\n\n// 5) Balance logic\nconst balance = income - expenses - savings;\n\n// 6) Final row ready for Google Sheets\nreturn [{\n  json: {\n    date,\n    time,\n    income,\n    expenses,\n    savings,\n    balance,\n    category,\n    payment_method,\n    notes\n  }\n}];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        592,
+        0
+      ],
+      "id": "b7cc0c9b-2432-4882-b8bd-fef594bbe29c",
+      "name": "Code in JavaScript"
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "1cMesOKMwK1u83TDpXpRe_ajQQrlkrjE9AvQyN5CtrqQ",
+          "mode": "list",
+          "cachedResultName": "Budget",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1cMesOKMwK1u83TDpXpRe_ajQQrlkrjE9AvQyN5CtrqQ/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "الورقة1",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1cMesOKMwK1u83TDpXpRe_ajQQrlkrjE9AvQyN5CtrqQ/edit#gid=0"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Date": "={{ $json.date }}",
+            "Time": "={{ $json.time }}",
+            "Income": "={{ $json.income }}",
+            "Expenses": "={{ $json.expenses }}",
+            "Savings": "={{ $json.savings }}",
+            "Balance": "={{ $json.balance }}",
+            "Expense Category": "={{ $json.category }}",
+            "Payment Method": "={{ $json.payment_method }}",
+            "Notes / Description": "={{ $json.notes }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "Date",
+              "displayName": "Date",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Time",
+              "displayName": "Time",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Income",
+              "displayName": "Income",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Expenses",
+              "displayName": "Expenses",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Savings",
+              "displayName": "Savings",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Balance",
+              "displayName": "Balance",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Payment Method",
+              "displayName": "Payment Method",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Expense Category",
+              "displayName": "Expense Category",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Notes / Description",
+              "displayName": "Notes / Description",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        800,
+        0
+      ],
+      "id": "1ad66da1-3edc-49fc-8af0-d535cdaa6467",
+      "name": "Append row in sheet",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "jpqBUxAgyVJbdQne",
+          "name": "Google Sheets account"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Telegram Trigger": {
+      "main": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send a text message": {
+      "main": [
+        []
+      ]
+    },
+    "AI Agent": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Gemini Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "Append row in sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Append row in sheet": {
+      "main": [
+        [
+          {
+            "node": "Send a text message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "availableInMCP": false
+  },
+  "versionId": "40bfb0d6-4762-4fd1-8d4a-529e8e199360",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "f9f414b0b87381100553492906a874a4b38c82b9760fa015ca0728db6074ef86"
+  },
+  "id": "WNveQdFBPyZWDpng",
+  "tags": [
+    {
+      "name": "Financial",
+      "id": "Ijxv7EEnhbkwJG8N",
+      "updatedAt": "2026-01-05T07:29:42.941Z",
+      "createdAt": "2026-01-05T07:29:42.941Z"
+    }
+  ]
+}
